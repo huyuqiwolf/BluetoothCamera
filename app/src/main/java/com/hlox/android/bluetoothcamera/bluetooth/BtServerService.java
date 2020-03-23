@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
+import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
@@ -36,7 +37,16 @@ public class BtServerService extends Service {
     private static final String TAG = "BtServerService";
     private static final int HEART = 0x1000;
     private MyHandler mHandler = new MyHandler();
+    private CountDownTimer mTimer = null;
+    private volatile long mLastUpdate = 0L;
     private BtCallback mCallback = new BtCallback() {
+
+        @Override
+        public void onWaiting() {
+            Log.d(TAG, "onWaiting: ");
+            EventBus.getDefault().post(new BtStateMsg(false, "waiting for connect"));
+        }
+
         @Override
         public void onWriteError(IOException e) {
             Log.d(TAG, "onWriteError: ");
@@ -55,6 +65,8 @@ public class BtServerService extends Service {
         public void onConnected(String name) {
             Log.d(TAG, "onConnected: " + name);
             EventBus.getDefault().post(new BtStateMsg(true, "connected " + name));
+            sendHeartMsg();
+
         }
 
         @Override
@@ -62,7 +74,8 @@ public class BtServerService extends Service {
             Log.d(TAG, "onDataReceived: ");
             switch (msg.getData()[0]) {
                 case BtMsg.HEAR:
-                    mHandler.sendEmptyMessageDelayed(HEART, 3000);
+                    Log.d(TAG, "onDataReceived: HEART");
+                    mLastUpdate = System.currentTimeMillis();
                     break;
                 case BtMsg.CONTROL:
                     processControl(msg.getData());
@@ -96,9 +109,8 @@ public class BtServerService extends Service {
     };
 
     private void processControl(byte[] data) {
-        byte[] temp = new byte[data.length - 1];
-        System.arraycopy(data, 1, temp, 0, temp.length);
-        ControlMsg msg = GsonUtil.parseJson(new String(temp), ControlMsg.class);
+        ControlMsg msg = GsonUtil.parseJson(new String(data, 1, data.length - 1), ControlMsg.class);
+        Log.d(TAG, "processControl: " + msg);
         if (msg.isConnect()) {
             // 判断是否已经存在了
             if (!AppUtil.isServiceRunning(this, PhotoService.class.getName())) {
@@ -115,6 +127,7 @@ public class BtServerService extends Service {
             }
         } else {
             stopService(new Intent(this, PhotoService.class));
+            init();
         }
     }
 
@@ -149,11 +162,11 @@ public class BtServerService extends Service {
     }
 
     @Subscribe(threadMode = ThreadMode.BACKGROUND)
-    public void onTextMsg(TextMsg textMsg){
+    public void onTextMsg(TextMsg textMsg) {
         if (mConnectedThread != null) {
             byte[] bytes = textMsg.getMsg().getBytes();
             byte[] data = new byte[bytes.length + 1];
-            data[0] = (byte) (BtMsg.PREVIEW & 0xFF);
+            data[0] = (byte) (BtMsg.TEXT & 0xFF);
             System.arraycopy(bytes, 0, data, 1, bytes.length);
             mConnectedThread.write(new BtMsg(data));
         }
@@ -177,6 +190,10 @@ public class BtServerService extends Service {
             mAcceptThread.cancel();
             mAcceptThread = null;
         }
+        if (mTimer != null) {
+            mTimer.cancel();
+            mTimer = null;
+        }
     }
 
     private void init() {
@@ -192,6 +209,47 @@ public class BtServerService extends Service {
         }
         mConnectedThread = new ConnectedThread(socket);
         mConnectedThread.start();
+        initTimer();
+    }
+
+    private void checkAlive() {
+        if (System.currentTimeMillis() - mLastUpdate >= 3000) {
+            init();
+        } else {
+            initTimer();
+        }
+    }
+
+    private void initTimer() {
+        if(mTimer!=null){
+            mTimer.cancel();
+        }
+        mTimer = new CountDownTimer(3000L, 1000L) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                Log.d(TAG, "onTick: ");
+                if (mConnectedThread != null) {
+                    sendHeartMsg();
+                }
+            }
+
+            @Override
+            public void onFinish() {
+                checkAlive();
+            }
+        };
+        mTimer.start();
+    }
+
+    private void sendHeartMsg() {
+        if (mConnectedThread != null) {
+            byte[] heartData = "HeartFromServer".getBytes();
+            byte[] data = new byte[heartData.length + 1];
+            data[0] = BtMsg.HEAR;
+            System.arraycopy(heartData, 0, data, 1, heartData.length);
+            BtMsg btMsg = new BtMsg(data);
+            mConnectedThread.write(btMsg);
+        }
     }
 
     private class MyHandler extends Handler {
@@ -220,6 +278,7 @@ public class BtServerService extends Service {
 
         @Override
         public void run() {
+            mCallback.onWaiting();
             BluetoothSocket socket = null;
             while (isWaiting) {
                 try {

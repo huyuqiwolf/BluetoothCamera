@@ -42,4 +42,9 @@ public interface BtCallback {
      * @param e 失败原因
      */
     void onWaitError(IOException e);
+
+    /**
+     * 等待被连接
+     */
+    void onWaiting();
 }

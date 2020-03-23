@@ -1,17 +1,16 @@
 package com.hlox.android.bluetoothcamera.bean;
 
-import com.google.gson.annotations.SerializedName;
 
 public class ControlMsg {
-    @SerializedName("connect")
+
     private boolean connect;
-    @SerializedName("changeCamera")
+
     private boolean changeCamera;
-    @SerializedName("takePhoto")
+
     private boolean takePhoto;
-    @SerializedName("response")
+
     private boolean response;
-    @SerializedName("file")
+
     private String file;
 
     public ControlMsg(boolean connect, boolean changeCamera, boolean takePhoto, boolean response, String file) {

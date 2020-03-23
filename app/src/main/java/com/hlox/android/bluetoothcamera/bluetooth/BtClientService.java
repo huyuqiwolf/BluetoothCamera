@@ -6,10 +6,12 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.os.Binder;
+import android.os.CountDownTimer;
 import android.os.IBinder;
 import android.util.Log;
 
 import com.hlox.android.bluetoothcamera.constant.Constant;
+import com.hlox.android.bluetoothcamera.service.PhotoService;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -21,40 +23,109 @@ public class BtClientService extends Service {
     private BtCallback mCallback;
     private ConnectedThread mConnectedThread;
     private ConnectThread mConnectThread;
+    private boolean quit = false;
+    private CountDownTimer mTimer;
+    private volatile long mLastUpdate = 0L;
+    private BluetoothDevice mDevice;
+
+    /**
+     * 主动断开的时候调用这个
+     */
+    public void deInit() {
+        Log.d(TAG, "deInit: ");
+        quit = true;
+        if (mConnectThread != null) {
+            mConnectThread.cancel();
+            mConnectThread = null;
+        }
+        if (mConnectedThread != null) {
+            mConnectedThread.cancel();
+            mConnectedThread = null;
+        }
+    }
 
     public class LocalBinder extends Binder {
-        public BtClientService getService(){
+        public BtClientService getService() {
             return BtClientService.this;
         }
     }
 
-    public void init(BluetoothDevice device,BtCallback callback){
+    public void init(BluetoothDevice device, BtCallback callback) {
         this.mCallback = callback;
+        this.mDevice = device;
         connect(device);
     }
 
-    public void sendMessage(BtMsg msg){
-        if(mConnectedThread!=null){
+    public void initTimer() {
+        if (mTimer != null) {
+            mTimer.cancel();
+            mTimer = null;
+        }
+        mTimer = new CountDownTimer(3000L, 1000L) {
+
+            @Override
+            public void onTick(long millisUntilFinished) {
+
+            }
+
+            @Override
+            public void onFinish() {
+                checkAlive();
+            }
+        };
+        mTimer.start();
+    }
+
+    private void checkAlive() {
+        if (System.currentTimeMillis() - mLastUpdate >= 3000L && !quit) {
+            connect(mDevice);
+        } else {
+            initTimer();
+        }
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+    }
+
+    @Override
+    public void onDestroy() {
+        if (mTimer != null) {
+            mTimer.cancel();
+            mTimer = null;
+        }
+        super.onDestroy();
+    }
+
+    public void sendMessage(BtMsg msg) {
+        if (mConnectedThread != null) {
             mConnectedThread.write(msg);
         }
     }
 
-
-    private void connect(BluetoothDevice device){
-        if(mConnectThread != null){
-            mConnectThread .cancel();
+    private void connect(BluetoothDevice device) {
+        if (quit) {
+            return;
+        }
+        if (mConnectThread != null) {
+            mConnectThread.cancel();
             mConnectThread = null;
         }
-        if(mConnectedThread!=null){
+        if (mConnectedThread != null) {
             mConnectedThread.cancel();
             mConnectedThread = null;
         }
-        mConnectThread =new ConnectThread(device);
+        mConnectThread = new ConnectThread(device);
         mConnectThread.start();
+        initTimer();
     }
 
-    private void manageConnection(BluetoothSocket socket){
-        if(mConnectedThread !=null){
+    private void manageConnection(BluetoothSocket socket) {
+        if (quit) {
+            return;
+        }
+        if (mConnectedThread != null) {
             mConnectedThread.cancel();
             mConnectedThread = null;
         }
@@ -93,8 +164,8 @@ public class BtClientService extends Service {
             manageConnection(mSocket);
         }
 
-        public void cancel(){
-            if(mSocket!=null){
+        public void cancel() {
+            if (mSocket != null) {
                 try {
                     mSocket.close();
                 } catch (IOException e) {
@@ -125,9 +196,9 @@ public class BtClientService extends Service {
 
         @Override
         public void run() {
-            if(isRead){
+            if (isRead) {
                 mCallback.onConnected(mSocket.getRemoteDevice().getName());
-            }else{
+            } else {
                 mCallback.onConnectFailed();
             }
             while (isRead) {
@@ -140,6 +211,7 @@ public class BtClientService extends Service {
                         int end = mIn.readByte();
                         Log.d(TAG, "run: length " + length + " end: " + end);
                         mCallback.onDataReceived(new BtMsg(buffer));
+                        mLastUpdate = System.currentTimeMillis();
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -175,7 +247,6 @@ public class BtClientService extends Service {
 
     @Override
     public boolean onUnbind(Intent intent) {
-        // TODO 销毁资源
         return super.onUnbind(intent);
     }
 }

@@ -84,7 +84,7 @@ public class PhotoService extends Service {
 
                 @Override
                 public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-                    Log.d(TAG, "onSurfaceTextureUpdated: ");
+
                     Bitmap bitmap = mTextureView.getBitmap(WIDTH, HEIGHT);
                     bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
                     bitmap.compress(Bitmap.CompressFormat.WEBP, 20, baos);
